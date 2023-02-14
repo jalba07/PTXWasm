@@ -1,0 +1,166 @@
+﻿@using ProTraxx.Shared.Model;
+@inherits LayoutComponentBase
+@inject Utilities.ILocalStorage LocalStorage
+@inject NavigationManager nav
+@inject HttpClient Http
+@using System.Net.Http.Json;
+
+	@* THIS ALLOWS IT TO BE A CASCADING PARAMETER *@
+<CascadingValue Value="this">
+	<div class="sidebar">
+		<NavMenu />
+	</div>
+	<div class="main">
+		<div class="top-row px-4">
+			<div style="width:70px;text-align:right;" class="mb-1">
+				@if (LoggedIn)
+				{
+					<button class="btn btn-sm btn-danger" title="Logout" @onclick="Logout"><span class="oi oi-account-logout"></span></button>
+				}
+				else
+				{
+					<a class="btn btn-sm btn-primary text-white" title="Register" href="/register"><span class="oi oi-pencil"></span></a>
+					<button class="btn btn-sm btn-success" title="Login" @onclick="OpenLogin"><span class="oi oi-account-login"></span></button>
+				}
+			</div>
+		</div>
+		<div class="content px-4">
+			@Body
+		</div>
+	</div>
+</CascadingValue>
+
+<div class="modal-backdrop fade @(show ? "show" : "") @(display ? "" : "d-none")"></div>
+<div class="modal fade @(show ? "show" : "")  @(display ? "d-block" : "d-none")" tabindex="-1" role="dialog">
+	<div class="modal-dialog" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Login Form</h5>
+				<button type="button" class="close" data-dismiss="modal" aria-label="Close" @onclick="Cancel">
+					<span aria-hidden="true">&times;</span>
+				</button>
+			</div>
+			<form @onsubmit="SubmitLogonForm">
+				<div class="modal-body">
+					<div class="mb-3">
+						<label for="loginEmail" class="form-label">Email</label>
+						<input type="email" class="form-control" id="loginEmail" placeholder="mailbox@domain.com" autocomplete="off" required @bind-value="log.Email" @onkeypress="() => loginMessage = null" />
+					</div>
+					<div class="mb-3">
+						<label for="loginPassword" class="form-label">Password</label>
+						<input type="password" class="form-control" id="loginPassword" required @bind-value="log.Password" @onkeypress="() => loginMessage = null" />
+					</div>
+					<div class="mb-3 alert alert-danger @(string.IsNullOrWhiteSpace(loginMessage) ? "d-none" : "")" role="alert">@loginMessage</div>
+				</div>
+				<div class="modal-footer">
+					<button type="submit" class="btn btn-success" disabled="@disableBtn">Login</button>
+					<button type="button" class="btn btn-secondary" data-dismiss="modal" @onclick="Cancel">Cancel</button>
+				</div>
+			</form>
+		</div>
+	</div>
+</div>
+
+@code {
+
+	private bool show, display, disableBtn;
+	LoginProTraxx log = new LoginProTraxx();
+	private string loginMessage, jwt, userEmail, userName;
+	bool loggedIn;
+
+	[Parameter]
+	public bool LoggedIn
+	{
+		get { return loggedIn; }
+		set { } // NOTE: don't allow this parameter to be set
+	}
+	[Parameter]
+
+	public string JWT
+	{
+		get { return jwt; }
+		set { } // NOTE: don't allow this parameter to be set
+	}
+
+	[Parameter]
+	public string UserEmail
+	{
+		get { return userEmail; }
+		set { } // NOTE: don't allow this parameter to be set
+	}
+
+	[Parameter]
+	public string UserName
+	{
+		get { return userName; }
+		set { } // NOTE: don't allow this parameter to be set
+	}
+
+	public async Task OpenLogin()
+	{
+		log.Clear();
+		display = true;
+		await Task.Delay(100);
+		show = true;
+	}
+
+	public async Task Logout()
+	{
+		userEmail = userName = jwt = null;
+		log.Clear();
+		loggedIn = false;
+		await LocalStorage.RemoveAsync("name");
+		await LocalStorage.RemoveAsync("jwt");
+		await LocalStorage.RemoveAsync("email");
+	}
+
+	private async Task<bool> SubmitLogonForm()
+	{
+		if (!string.IsNullOrEmpty(log.Email) && !string.IsNullOrEmpty(log.Password))
+		{
+			disableBtn = true;
+			using (var msg = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync<LoginProTraxx>(Http, "/api/auth/login", log, System.Threading.CancellationToken.None))
+			{
+				if (msg.IsSuccessStatusCode)
+				{
+					LoginResult result = await msg.Content.ReadFromJsonAsync<LoginResult>();
+					if (!string.IsNullOrEmpty(result.JWT))
+					{
+						await Cancel();
+						loggedIn = true;
+						userEmail = result.Email;
+						jwt = result.JWT;
+						userName = result.Name;
+						await LocalStorage.SaveStringAsync("email", result.Email);
+						await LocalStorage.SaveStringAsync("jwt", result.JWT);
+						await LocalStorage.SaveStringAsync("name", result.Name);
+					}
+					else
+					{
+						loginMessage = result.Message;
+					}
+				}
+				disableBtn = false;
+			}
+		}
+		return false;
+	}
+
+	private async Task Cancel()
+	{
+		loginMessage = null;
+		show = false;
+		await Task.Delay(500);
+		display = false;
+	}
+
+
+	protected override async Task OnInitializedAsync()
+	{
+		await base.OnInitializedAsync();
+		userEmail = await LocalStorage.GetStringAsync("email");
+		jwt = await LocalStorage.GetStringAsync("jwt");
+		userName = await LocalStorage.GetStringAsync("name");
+		loggedIn = !string.IsNullOrEmpty(jwt);
+	}
+}
